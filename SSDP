@@ -1,73 +1,56 @@
-#include <iostream>
-#include <string>
-#include <cstring>
+import urllib2
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+# Parse the response to get the required information
+response = """
+('192.168.11.1', 1900) b'HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\nST: upnp:rootdevice\r\nUSN: uuid:e295febc-e2d3-4a80-96c4-c3b75d1a4d63: :upnp:root device\r\nEXT:\r\nSERVER: openSUSE project/42.2 UPnP/2.0 MiniUPnPd/2.1\r\nLOCATION: http://192.168.11.1:43689/root Desc.xml\r\nSECURE LOCATION.UPNP.ORG: https://192.168.11.1:32925/rootDesc.xml\r\nOPT: "http://schemas.upnp.org/upnp/1/0/"; ns-01\r\n01-NLS: 1697464171\r\nBOOTID. UPNP.ORG: 1697464171\r\nCONFIGID.UPNP.ORG: 1337\r\n'
+"""
 
-const int SSDP_PORT = 1900;
-const char* SSDP_ADDR = "239.255.255.250";
+# Parse the response to get the URL and port
+url_start = response.find("LOCATION: ") + len("LOCATION: ")
+url_end = response.find("\r\n", url_start)
+url = response[url_start:url_end]
 
-const char* SSDP_MSEARCH = 
-"M-SEARCH * HTTP/1.1\r\n"
-"HOST: 239.255.255.250:1900\r\n"
-"MAN: \"ssdp:discover\"\r\n"
-"MX: 2\r\n"
-"ST: upnp:rootdevice\r\n"
-"\r\n";
+# Parse the port from the URL
+port_start = url.find(":", 7) + 1
+port_end = url.find("/", port_start)
+port = url[port_start:port_end]
 
-int main() {
+# Use the URL and port to build the SOAP request
+URL = url  # Use the URL obtained from the response
+PORT = int(port)  # Use the port obtained from the response
 
-  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-  
-  sockaddr_in ssdp_addr;
-  ssdp_addr.sin_family = AF_INET;
-  ssdp_addr.sin_port = htons(SSDP_PORT);
-  inet_pton(AF_INET, SSDP_ADDR, &ssdp_addr.sin_addr);
+NEW_EXTERNAL_PORT = 1194
+NEW_INTERNAL_PORT = 1194
+NEW_INTERNAL_CLIENT = '192.168.1.3'
+NEW_PROTOCOL = 'UDP'
+LEASE_DURATION = '0'
+DESCRIPTION = 'test'
 
-  // Send M-SEARCH query
-  sendto(sockfd, SSDP_MSEARCH, strlen(SSDP_MSEARCH), 0, 
-          (struct sockaddr*)&ssdp_addr, sizeof(ssdp_addr));
-          
-  // Receive responses
-  char buffer[1500];
-  sockaddr_in router_addr;
-  socklen_t router_addr_len = sizeof(router_addr);
+SOAP = '<?xml version="1.0"?>\r\n'
+SOAP += '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r\n'
+SOAP += '<s:Body>\r\n'
+SOAP += '<m:AddPortMapping xmlns:m="urn:schemas-upnp-org:service:WANPPPConnection:1">\r\n'
+SOAP += '<NewRemoteHost></NewRemoteHost>\r\n'
+SOAP += '<NewExternalPort>' + str(NEW_EXTERNAL_PORT) + '</NewExternalPort>\r\n'
+SOAP += '<NewProtocol>' + NEW_PROTOCOL + '</NewProtocol>\r\n'
+SOAP += '<NewInternalPort>' + str(NEW_INTERNAL_PORT) + '</NewInternalPort>\r\n'
+SOAP += '<NewInternalClient>' + NEW_INTERNAL_CLIENT + '</NewInternalClient>\r\n'
+SOAP += '<NewEnabled>1</NewEnabled>\r\n'
+SOAP += '<NewPortMappingDescription>' + DESCRIPTION + '</NewPortMappingDescription>\r\n'
+SOAP += '<NewLeaseDuration>' + LEASE_DURATION + '</NewLeaseDuration>\r\n'
 
-  int n = recvfrom(sockfd, buffer, 1500, 0, 
-                  (struct sockaddr*)&router_addr, &router_addr_len);
-  buffer[n] = '\0';
+SOAP += '</m:AddPortMapping>\r\n'
+SOAP += '</s:Body>\r\n'
+SOAP += '</s:Envelope>\r\n'
 
-  // Parse response to find location
-  char* locIndex = strstr(buffer, "LOCATION:");
-  if (!locIndex) {
-    std::cout << "No location found" << std::endl;
-    return 1;
-  }
+req = urllib2.Request(URL)
+req.add_header('Content-Type', 'text/xml; charset="utf-8"')
+req.add_header('SOAPACTION', '"urn:schemas-upnp-org:service:WANPPPConnection:1#AddPortMapping"')
+req.add_data(SOAP)
 
-  char* locEnd = strstr(locIndex, "\r\n");
-  std::string location(locIndex + 9, locEnd);
-
-  // Extract hostname and port
-  std::string hostname; 
-  int port = 80;
-  
-  size_t slashIndex = location.find("/");
-  if (slashIndex != std::string::npos) {
-    hostname = location.substr(0, slashIndex);
-    port = 80; 
-  }
-
-  size_t colonIndex = hostname.find(":");
-  if (colonIndex != std::string::npos) {
-    port = std::stoi(hostname.substr(colonIndex+1));
-    hostname = hostname.substr(0, colonIndex);
-  }
-
-  std::cout << "Router IP: " << router_addr.sin_addr.s_addr << std::endl;
-  std::cout << "Router hostname: " << hostname << std::endl;
-  std::cout << "Router port: " << port << std::endl;
-
-  return 0;
-}
+try:
+    res = urllib2.urlopen(req)
+    print res.read()
+except urllib2.HTTPError, e:
+    print e.code
+    print e.msg
