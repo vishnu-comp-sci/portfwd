@@ -1,53 +1,73 @@
 #include <iostream>
+#include <string>
 #include <cstring>
-#include <curl/curl.h>
 
-const char* SSDP_MSEARCH = "M-SEARCH * HTTP/1.1\r\n"
-                           "HOST: 239.255.255.250:1900\r\n"
-                           "MAN: \"ssdp:discover\"\r\n"
-                           "MX: 2\r\n"
-                           "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t realsize = size * nmemb;
-    std::string* response = static_cast<std::string*>(userp);
-    response->append(static_cast<char*>(contents), realsize);
-    return realsize;
-}
+const int SSDP_PORT = 1900;
+const char* SSDP_ADDR = "239.255.255.250";
+
+const char* SSDP_MSEARCH = 
+"M-SEARCH * HTTP/1.1\r\n"
+"HOST: 239.255.255.250:1900\r\n"
+"MAN: \"ssdp:discover\"\r\n"
+"MX: 2\r\n"
+"ST: upnp:rootdevice\r\n"
+"\r\n";
 
 int main() {
-    // Initialize libcurl
-    CURL* curl;
-    CURLcode res;
-    curl = curl_easy_init();
 
-    if (curl) {
-        // Set the target address and port for SSDP
-        curl_easy_setopt(curl, CURLOPT_URL, "http://239.255.255.250:1900");
+  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  
+  sockaddr_in ssdp_addr;
+  ssdp_addr.sin_family = AF_INET;
+  ssdp_addr.sin_port = htons(SSDP_PORT);
+  inet_pton(AF_INET, SSDP_ADDR, &ssdp_addr.sin_addr);
 
-        // Set the SSDP M-SEARCH request
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, SSDP_MSEARCH);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(SSDP_MSEARCH));
+  // Send M-SEARCH query
+  sendto(sockfd, SSDP_MSEARCH, strlen(SSDP_MSEARCH), 0, 
+          (struct sockaddr*)&ssdp_addr, sizeof(ssdp_addr));
+          
+  // Receive responses
+  char buffer[1500];
+  sockaddr_in router_addr;
+  socklen_t router_addr_len = sizeof(router_addr);
 
-        // Receive responses in a string
-        std::string response;
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  int n = recvfrom(sockfd, buffer, 1500, 0, 
+                  (struct sockaddr*)&router_addr, &router_addr_len);
+  buffer[n] = '\0';
 
-        // Perform the HTTP request
-        res = curl_easy_perform(curl);
+  // Parse response to find location
+  char* locIndex = strstr(buffer, "LOCATION:");
+  if (!locIndex) {
+    std::cout << "No location found" << std::endl;
+    return 1;
+  }
 
-        // Check for errors
-        if (res != CURLE_OK) {
-            std::cerr << "Error: " << curl_easy_strerror(res) << std::endl;
-        } else {
-            // Print the SSDP response, which may contain the URL
-            std::cout << "SSDP Response:\n" << response << std::endl;
-        }
+  char* locEnd = strstr(locIndex, "\r\n");
+  std::string location(locIndex + 9, locEnd);
 
-        // Clean up libcurl
-        curl_easy_cleanup(curl);
-    }
+  // Extract hostname and port
+  std::string hostname; 
+  int port = 80;
+  
+  size_t slashIndex = location.find("/");
+  if (slashIndex != std::string::npos) {
+    hostname = location.substr(0, slashIndex);
+    port = 80; 
+  }
 
-    return 0;
+  size_t colonIndex = hostname.find(":");
+  if (colonIndex != std::string::npos) {
+    port = std::stoi(hostname.substr(colonIndex+1));
+    hostname = hostname.substr(0, colonIndex);
+  }
+
+  std::cout << "Router IP: " << router_addr.sin_addr.s_addr << std::endl;
+  std::cout << "Router hostname: " << hostname << std::endl;
+  std::cout << "Router port: " << port << std::endl;
+
+  return 0;
 }
