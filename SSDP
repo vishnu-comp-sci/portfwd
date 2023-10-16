@@ -1,54 +1,52 @@
 #include <iostream>
-#include <string>
-#include <boost/asio.hpp>
+#include <cstring>
+#include <curl/curl.h>
 
-namespace asio = boost::asio;
-using asio::ip::udp;
+const char* SSDP_MSEARCH = "M-SEARCH * HTTP/1.1\r\n"
+                           "HOST: 239.255.255.250:1900\r\n"
+                           "MAN: \"ssdp:discover\"\r\n"
+                           "MX: 2\r\n"
+                           "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
+
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t realsize = size * nmemb;
+    std::string* response = static_cast<std::string*>(userp);
+    response->append(static_cast<char*>(contents), realsize);
+    return realsize;
+}
 
 int main() {
-    try {
-        asio::io_service io_service;
+    // Initialize libcurl
+    CURL* curl;
+    CURLcode res;
+    curl = curl_easy_init();
 
-        // Create a socket for sending and receiving SSDP messages
-        udp::socket socket(io_service, udp::endpoint(udp::v4(), 0));
+    if (curl) {
+        // Set the target address and port for SSDP
+        curl_easy_setopt(curl, CURLOPT_URL, "http://239.255.255.250:1900");
 
-        // Set the SSDP search target for UPnP root devices
-        std::string searchTarget = "ssdp:all";
+        // Set the SSDP M-SEARCH request
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, SSDP_MSEARCH);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(SSDP_MSEARCH));
 
-        // Send an M-SEARCH request for UPnP devices
-        std::string request = "M-SEARCH * HTTP/1.1\r\n"
-                             "HOST: 239.255.255.250:1900\r\n"
-                             "ST: " + searchTarget + "\r\n"
-                             "MX: 2\r\n"
-                             "MAN: \"ssdp:discover\"\r\n\r\n";
+        // Receive responses in a string
+        std::string response;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-        udp::resolver resolver(io_service);
-        udp::resolver::query query(udp::v4(), "239.255.255.250", "1900");
-        udp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+        // Perform the HTTP request
+        res = curl_easy_perform(curl);
 
-        // Send the M-SEARCH request to the multicast address
-        socket.send_to(asio::buffer(request), *endpoint_iterator);
-
-        // Receive SSDP responses
-        while (true) {
-            udp::endpoint sender_endpoint;
-            char data[2048];
-            size_t length = socket.receive_from(asio::buffer(data, sizeof(data)), sender_endpoint);
-
-            // Parse and display SSDP response
-            std::string response(data, length);
-            std::cout << "Received SSDP Response:\n" << response << "\n\n";
-
-            // Parse the response to find the URL (location) of the UPnP service
-            size_t locationPos = response.find("LOCATION: ");
-            if (locationPos != std::string::npos) {
-                size_t locationEndPos = response.find_first_of("\r\n", locationPos);
-                std::string location = response.substr(locationPos + 10, locationEndPos - locationPos - 10);
-                std::cout << "Discovered UPnP service at URL: " << location << "\n";
-            }
+        // Check for errors
+        if (res != CURLE_OK) {
+            std::cerr << "Error: " << curl_easy_strerror(res) << std::endl;
+        } else {
+            // Print the SSDP response, which may contain the URL
+            std::cout << "SSDP Response:\n" << response << std::endl;
         }
-    } catch (std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+
+        // Clean up libcurl
+        curl_easy_cleanup(curl);
     }
 
     return 0;
