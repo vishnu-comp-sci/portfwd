@@ -1,0 +1,41 @@
+#include <iostream>
+#include <string>
+#include <boost/asio.hpp>
+
+using boost::asio::ip::udp;
+
+int main() {
+  try {
+    boost::asio::io_context io_context;
+
+    udp::socket socket(io_context);
+    socket.open(udp::v4());
+
+    std::string msearch = 
+      "M-SEARCH * HTTP/1.1\r\n"
+      "HOST: 239.255.255.250:1900\r\n"
+      "MAN: \"ssdp:discover\"\r\n"
+      "MX: 2\r\n"
+      "ST: upnp:rootdevice\r\n"
+      "\r\n";
+
+    boost::asio::ip::address multicast_address = 
+      boost::asio::ip::make_address("239.255.255.250");
+
+    socket.set_option(boost::asio::ip::multicast::join_group(multicast_address));
+
+    socket.send_to(boost::asio::buffer(msearch), multicast_address, 1900);
+
+    char reply[1024];
+    udp::endpoint sender_endpoint;
+    size_t reply_length = socket.receive_from(
+        boost::asio::buffer(reply, sizeof(reply)), sender_endpoint);
+
+    std::cout.write(reply, reply_length);
+  }
+  catch (std::exception& e) {
+    std::cerr << e.what() << std::endl;
+  }
+
+  return 0;
+}
