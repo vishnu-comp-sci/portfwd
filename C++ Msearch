@@ -1,41 +1,59 @@
 #include <iostream>
 #include <string>
-#include <boost/asio.hpp>
-
-using boost::asio::ip::udp;
+#include <cstring>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 int main() {
-  try {
-    boost::asio::io_context io_context;
 
-    udp::socket socket(io_context);
-    socket.open(udp::v4());
-
-    std::string msearch = 
-      "M-SEARCH * HTTP/1.1\r\n"
-      "HOST: 239.255.255.250:1900\r\n"
-      "MAN: \"ssdp:discover\"\r\n"
-      "MX: 2\r\n"
-      "ST: upnp:rootdevice\r\n"
-      "\r\n";
-
-    boost::asio::ip::address multicast_address = 
-      boost::asio::ip::make_address("239.255.255.250");
-
-    socket.set_option(boost::asio::ip::multicast::join_group(multicast_address));
-
-    socket.send_to(boost::asio::buffer(msearch), multicast_address, 1900);
-
-    char reply[1024];
-    udp::endpoint sender_endpoint;
-    size_t reply_length = socket.receive_from(
-        boost::asio::buffer(reply, sizeof(reply)), sender_endpoint);
-
-    std::cout.write(reply, reply_length);
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if(sock < 0) {
+    perror("socket");
+    return 1;
   }
-  catch (std::exception& e) {
-    std::cerr << e.what() << std::endl;
+
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = inet_addr("239.255.255.250");
+  addr.sin_port = htons(1900);
+
+  struct ip_mreq mreq;
+  mreq.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
+  mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+
+  if(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+    perror("setsockopt");
+    return 1;
   }
+
+  std::string msearch = 
+    "M-SEARCH * HTTP/1.1\r\n"
+    "HOST: 239.255.255.250:1900\r\n"
+    "MAN: \"ssdp:discover\"\r\n"
+    "MX: 2\r\n"
+    "ST: upnp:rootdevice\r\n"
+    "\r\n";
+
+  if(sendto(sock, msearch.c_str(), msearch.size(), 0, 
+           (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    perror("sendto");
+    return 1;
+  }
+
+  char buffer[1024];
+  struct sockaddr_in sender;
+  socklen_t sender_len = sizeof(sender);
+
+  int nbytes = recvfrom(sock, buffer, sizeof(buffer), 0, 
+                        (struct sockaddr*)&sender, &sender_len);
+
+  if(nbytes > 0) {
+    std::cout.write(buffer, nbytes);
+  }
+
+  close(sock);
 
   return 0;
 }
