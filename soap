@@ -1,0 +1,23 @@
+import upnpclient
+
+device = upnpclient.Device('http://192.168.15.1:40221/rootDesc.xml') 
+
+# Create port mapping
+port_map = upnpclient.PortMapping(...) 
+
+# Add port mapping
+device.AddPortMapping(port_map)
+
+# Get all current port mappings
+current_ports = device.GetGenericPortMappingEntry()
+
+# Check if our mapping is present
+mapping_added = False
+for port in current_ports:
+    if port.external_port == 5000:
+        mapping_added = True
+
+if mapping_added:
+    print("Port mapping successful!")
+else:
+    print("Failed to add port mapping.")
