@@ -1,0 +1,34 @@
+package main
+
+import (
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+func main() {
+	gateway, err := getDefaultGateway()
+	if err != nil {
+		fmt.Println("Error:", err)
+	} else {
+		fmt.Println("Default Gateway:", gateway)
+	}
+}
+
+func getDefaultGateway() (string, error) {
+	cmd := exec.Command("netstat", "-rn")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+			return fields[2], nil
+		}
+	}
+
+	return "", fmt.Errorf("Default gateway not found")
+}
